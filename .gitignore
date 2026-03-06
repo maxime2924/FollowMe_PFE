@@ -1,0 +1,18 @@
+# Fichiers Systèmes
+.DS_Store
+Thumbs.db
+
+# Python (Vision IA)
+__pycache__/
+*.pyc
+venv/
+.env
+
+# C++ / Arduino (Motor Control)
+build/
+*.o
+*.elf
+*.bin
+
+# Editeurs
+.vscode/
