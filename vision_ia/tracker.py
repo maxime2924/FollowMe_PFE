@@ -80,7 +80,7 @@ class VisionTracker:
             
             # Affichage
             cv2.imshow("FollowMe - Vision Edge AI", annotated_frame)
-            
+            # Condition de sortie (Touche 'q') ET frein moteur !
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
                 
