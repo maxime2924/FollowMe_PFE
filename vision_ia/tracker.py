@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import serial
 import time
 from flask import Flask, Response
+from picamera2 import Picamera2
 
 app = Flask(__name__)
 tracker_instance = None
@@ -11,7 +12,9 @@ tracker_instance = None
 class VisionTracker:
     def __init__(self, source="test.mp4"):
         self.source = source
-        self.cap = cv2.VideoCapture(self.source)
+        self.picam = Picamera2()
+        self.picam.configure(self.picam.create_video_configuration(main={"size": (320, 240)}))
+        self.picam.start()
         
         # Chargement du modèle NCNN (ton modèle ultra-rapide)
         print("[INFO] Chargement du modèle YOLOv8...")
@@ -32,10 +35,8 @@ class VisionTracker:
             print("[AVERTISSEMENT] Mode simulation.")
 
     def process_one_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, frame = self.cap.read()
+        frame = self.picam.capture_array()
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         # Redimensionnement pour Flask
         frame = cv2.resize(frame, (320, 240))
@@ -58,18 +59,23 @@ class VisionTracker:
                 w, h = x2 - x, y2 - y
 
                 # On (re)démarre le tracker léger
-                self.tracker = cv2.TrackerMIL_create()
-                self.tracker.init(frame, (x, y, w, h))
+                if x >= 0 and y >= 0 and x+w <= frame.shape[1] and y+h <= frame.shape[0] and w > 10 and h > 10:
+                    self.tracker = cv2.TrackerMIL_create()
+                    self.tracker.init(frame, (x, y, w, h))
                 self.tracking_active = True
                 box_to_draw = (x, y, w, h)
                 success = True
         else:
             # On utilise le suivi ultra-rapide (pas d'IA ici !)
-            success, bbox = self.tracker.update(frame)
-            if success:
-                box_to_draw = [int(v) for v in bbox]
-            else:
-                self.tracking_active = False # Cible perdue
+            try:
+                success, bbox = self.tracker.update(frame)
+                if success:
+                    box_to_draw = [int(v) for v in bbox]
+                else:
+                    self.tracking_active = False
+            except cv2.error:
+                self.tracking_active = False
+                success = False
 
         self.frame_count += 1
 
@@ -116,5 +122,5 @@ def video_feed():
     return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == "__main__":
-    tracker_instance = VisionTracker("test.mp4")
+    tracker_instance = VisionTracker("camera")
     app.run(host='0.0.0.0', port=5000, threaded=True)
