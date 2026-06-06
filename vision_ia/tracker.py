@@ -14,18 +14,18 @@ class VisionTracker:
         self.cap = cv2.VideoCapture(self.source)
         
         # Chargement du modèle NCNN (ton modèle ultra-rapide)
-        print("[INFO] Chargement du moteur NCNN...")
-        self.model = YOLO('yolov8n_ncnn_model', task='detect')
+        print("[INFO] Chargement du modèle YOLOv8...")
+        self.model = YOLO('yolov8n.pt')
 
         # Initialisation du Tracker OpenCV (Léger)
-        self.tracker = cv2.TrackerKCF_create()
+        self.tracker = cv2.TrackerMIL_create()
         self.tracking_active = False
         self.frame_count = 0
         self.detection_interval = 15 # On relance YOLO toutes les 15 images
 
         self.arduino = None
         try:
-            self.arduino = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+            self.arduino = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
             time.sleep(2)
             print("[INFO] Arduino OK.")
         except:
@@ -58,7 +58,7 @@ class VisionTracker:
                 w, h = x2 - x, y2 - y
 
                 # On (re)démarre le tracker léger
-                self.tracker = cv2.TrackerKCF_create()
+                self.tracker = cv2.TrackerMIL_create()
                 self.tracker.init(frame, (x, y, w, h))
                 self.tracking_active = True
                 box_to_draw = (x, y, w, h)
