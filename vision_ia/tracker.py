@@ -22,9 +22,9 @@ running = True
 # par le PID continu ci-dessous) mais conserves en reference / historique.
 ERREUR_X_FORTE = 50      # px - ancien seuil rotation forte (pre-PID)
 ERREUR_X_DOUCE = 40      # px - ancien seuil correction douce (pre-PID)
-DIST_TROP_PRES = 45      # cm - en-dessous: passage TROP_PROCHE
-DIST_RETOUR_SUIVRE = 60  # cm - au-dessus (depuis TROP_PROCHE): retour SUIVRE
-DIST_AVANCER = 80        # cm - au-dessus: AVANCER
+DIST_TROP_PRES = 60      # cm - en-dessous: passage TROP_PROCHE
+DIST_RETOUR_SUIVRE = 80  # cm - au-dessus (depuis TROP_PROCHE): retour SUIVRE
+DIST_AVANCER = 110       # cm - au-dessus: AVANCER
 RECUL_TIMEOUT = 2.0      # secondes - securite anti-mur en TROP_PROCHE
 SAUT_OF_MAX = 100        # px - au-dela: saut impossible OF -> cible perdue forcee
 
@@ -120,6 +120,8 @@ class VisionTracker:
 
         # Distance ultrasons lue en parallele
         self.distance_cm = -1
+        self.distance_gauche_cm = -1   # servo radar (Tier 3)
+        self.distance_droite_cm = -1   # servo radar (Tier 3)
         self.dist_lock = threading.Lock()
 
         self.arduino = None
@@ -134,7 +136,7 @@ class VisionTracker:
             print("[AVERTISSEMENT] Mode simulation.")
 
     def _read_distance_loop(self):
-        """Thread qui lit en continu les messages DIST:XX de l'Arduino."""
+        """Thread qui lit en continu les messages DIST:/DISTG:/DISTD: de l'Arduino."""
         while running:
             try:
                 if self.arduino and self.arduino.in_waiting > 0:
@@ -143,6 +145,14 @@ class VisionTracker:
                         val = int(line.split(":")[1])
                         with self.dist_lock:
                             self.distance_cm = val
+                    elif line.startswith("DISTG:"):
+                        val = int(line.split(":")[1])
+                        with self.dist_lock:
+                            self.distance_gauche_cm = val
+                    elif line.startswith("DISTD:"):
+                        val = int(line.split(":")[1])
+                        with self.dist_lock:
+                            self.distance_droite_cm = val
             except:
                 pass
             time.sleep(0.01)
@@ -150,6 +160,10 @@ class VisionTracker:
     def get_distance(self):
         with self.dist_lock:
             return self.distance_cm
+
+    def get_distances_laterales(self):
+        with self.dist_lock:
+            return self.distance_gauche_cm, self.distance_droite_cm
 
     def send(self, cmd):
         if self.arduino:
@@ -458,10 +472,13 @@ class VisionTracker:
         self.update_signal_detresse()
 
         # Overlay
+        dist_g, dist_d = self.get_distances_laterales()
         signal_txt = " SIGNAL!" if self.signal_actif else ""
         lat_txt = f" L:{self.last_latence_ms:.0f}ms" if self.last_latence_ms is not None else ""
         status_txt = f"F:{self.frame_count} D:{dist}cm SC:{self.frames_sans_cible} ETAT:{self.etat}{signal_txt}{lat_txt}"
+        radar_txt = f"RADAR G:{dist_g}cm D:{dist_d}cm"
         cv2.putText(frame, status_txt, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        cv2.putText(frame, radar_txt, (5, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 255), 1)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         return buffer.tobytes()
