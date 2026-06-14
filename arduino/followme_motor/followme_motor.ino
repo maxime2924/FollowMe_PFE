@@ -1,6 +1,7 @@
 // FollowMe — Contrôle moteurs Arduino
 // Communication série 115200 bauds depuis Raspberry Pi
-// Commandes : AVANCER / STOP / GAUCHE / DROITE / RECULER
+// Commandes discretes : AVANCER / STOP / GAUCHE / DROITE / RECULER
+// Commande PID (vitesse differentielle continue) : M:gauche,droite  (ex: M:120,-40)
 
 // === PINS (Freenove 4WD shield) ===
 #define MOTOR_DIRECTION      0   // Mettre à 1 si les roues tournent à l'envers
@@ -17,6 +18,7 @@
 // === VITESSE ===
 #define VITESSE_AVANCE  100   // 0-255
 #define VITESSE_TOURNE  70
+#define PWM_MAX         255   // borne de securite pour la commande M:
 
 void setup() {
   Serial.begin(115200);
@@ -74,6 +76,24 @@ void loop() {
     else if (ordre == "RECULER") {
       motorRun(-VITESSE_AVANCE, -VITESSE_AVANCE);
       Serial.println("OK: RECULER");
+    }
+    else if (ordre.startsWith("M:")) {
+      // Commande PID : vitesse differentielle continue "M:gauche,droite"
+      int sepIndex = ordre.indexOf(',', 2);
+      if (sepIndex > 0) {
+        int speedL = ordre.substring(2, sepIndex).toInt();
+        int speedR = ordre.substring(sepIndex + 1).toInt();
+
+        // Securite : bornage des valeurs reçues
+        speedL = constrain(speedL, -PWM_MAX, PWM_MAX);
+        speedR = constrain(speedR, -PWM_MAX, PWM_MAX);
+
+        motorRun(speedL, speedR);
+        Serial.print("OK: M:");
+        Serial.print(speedL);
+        Serial.print(",");
+        Serial.println(speedR);
+      }
     }
   }
 }
