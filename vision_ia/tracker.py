@@ -48,6 +48,12 @@ PIN_PIR = 27               # GPIO27 (pin physique 13)
 PIR_VEILLE_DELAI = 5.0     # secondes sans detection PIR avant passage en veille
 PIR_ACTIVE = False         # passer a True une fois le capteur PIR cable et teste
 
+# === POST-IT JAUNE (Tier 4) - fallback HSV si YOLO+OF echouent ===
+# Plage de depart pour post-it jaune standard, A CALIBRER demain selon eclairage reel
+HSV_JAUNE_BAS = np.array([20, 100, 120])
+HSV_JAUNE_HAUT = np.array([35, 255, 255])
+HSV_AIRE_MIN = 150   # pixels - taille minimale du blob jaune pour etre valide
+
 
 class VisionTracker:
     def __init__(self):
@@ -221,6 +227,31 @@ class VisionTracker:
     def stop(self):
         self.send(b"STOP\n")
         self._signal_off()
+
+    def detect_post_it_jaune(self, frame):
+        """
+        Fallback (Tier 4) : detecte un blob jaune fluo (post-it) dans la frame.
+        Retourne (cx, cy) du plus gros blob valide, ou None si rien trouve.
+        """
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, HSV_JAUNE_BAS, HSV_JAUNE_HAUT)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        plus_grand = max(contours, key=cv2.contourArea)
+        aire = cv2.contourArea(plus_grand)
+        if aire < HSV_AIRE_MIN:
+            return None
+
+        M = cv2.moments(plus_grand)
+        if M["m00"] == 0:
+            return None
+
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+        return (cx, cy)
 
     def yolo_detect(self, frame):
         img = cv2.resize(frame, (320, 320))
@@ -446,6 +477,24 @@ class VisionTracker:
         else:
             if not mouvement:
                 self.frames_sans_cible += 1
+
+        # --- POST-IT JAUNE (Tier 4) : fallback si YOLO+OF n'ont rien donne ---
+        # Declenche seulement quand on approche de la perte de cible, pour
+        # eviter le cout HSV sur chaque frame en fonctionnement normal.
+        if center is None and self.frames_sans_cible >= self.max_frames_sans_cible - 1:
+            blob = self.detect_post_it_jaune(frame)
+            if blob is not None:
+                cx, cy = blob
+                self.target_center = (cx, cy)
+                self.prev_points = np.array([[cx, cy]], dtype=np.float32).reshape(-1, 1, 2)
+                self.prev_gray = gray.copy()
+                center = (cx, cy)
+                self.frames_sans_cible = 0
+                source = "HSV"
+                cv2.circle(frame, (cx, cy), 10, (0, 255, 255), 2)
+                cv2.putText(frame, "POST-IT", (cx - 30, cy - 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+                print("[HSV] Post-it jaune detecte - relais YOLO/OF")
 
         self.frame_count += 1
 
