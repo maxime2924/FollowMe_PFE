@@ -43,6 +43,11 @@ PID_KI = 0.0    # gain integral (desactive au depart)
 PID_KD = 0.1    # gain derive (amortissement)
 PID_OUTPUT_MAX = 100  # cm/PWM - borne max de la correction differentielle
 
+# === PIR (Tier 3) - mode veille / economie CPU ===
+PIN_PIR = 27               # GPIO27 (pin physique 13)
+PIR_VEILLE_DELAI = 5.0     # secondes sans detection PIR avant passage en veille
+PIR_ACTIVE = False         # passer a True une fois le capteur PIR cable et teste
+
 
 class VisionTracker:
     def __init__(self):
@@ -93,6 +98,10 @@ class VisionTracker:
         self.pid_integrale = 0.0
         self.pid_last_time = time.time()
 
+        # --- PIR (Tier 3) : mode veille ---
+        self.en_veille = False
+        self.derniere_detection_pir = time.time()
+
         # --- EF_04 : Buzzer + LED RGB (GPIO Pi) ---
         if GPIO_AVAILABLE:
             GPIO.setmode(GPIO.BCM)
@@ -103,8 +112,11 @@ class VisionTracker:
             GPIO.setup(PIN_LED_B, GPIO.OUT)
             self._signal_off()
             print("[INFO] GPIO buzzer/LED OK.")
+            if PIR_ACTIVE:
+                GPIO.setup(PIN_PIR, GPIO.IN)
+                print("[INFO] GPIO PIR OK.")
         else:
-            print("[AVERTISSEMENT] RPi.GPIO indisponible - signal EF_04 desactive.")
+            print("[AVERTISSEMENT] RPi.GPIO indisponible - signal EF_04 et PIR desactives.")
 
         # Distance ultrasons lue en parallele
         self.distance_cm = -1
@@ -332,6 +344,33 @@ class VisionTracker:
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         frame = cv2.resize(frame, (320, 240))
+
+        # --- PIR : gestion mode veille ---
+        pir_actif = False
+        if GPIO_AVAILABLE and PIR_ACTIVE:
+            pir_actif = GPIO.input(PIN_PIR) == GPIO.HIGH
+            if pir_actif:
+                self.derniere_detection_pir = time.time()
+
+        temps_sans_pir = time.time() - self.derniere_detection_pir
+
+        if GPIO_AVAILABLE and PIR_ACTIVE and temps_sans_pir >= PIR_VEILLE_DELAI:
+            if not self.en_veille:
+                self.en_veille = True
+                print(f"[PIR] Mode veille active (pas de mouvement depuis {PIR_VEILLE_DELAI}s)")
+                self.etat = "PERDU"
+                self.send(b"STOP\n")
+
+            # En veille : on saute MOG2/YOLO/OF/decision, on renvoie juste la frame
+            self.frame_count += 1
+            cv2.putText(frame, f"F:{self.frame_count} VEILLE (PIR)", (5, 20),
+                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
+            ret, buffer = cv2.imencode('.jpg', frame)
+            return buffer.tobytes()
+
+        if self.en_veille:
+            self.en_veille = False
+            print("[PIR] Reveil (mouvement detecte)")
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         largeur = frame.shape[1]
