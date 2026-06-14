@@ -13,7 +13,18 @@
 // === ULTRASONS ===
 #define PIN_TRIG  7
 #define PIN_ECHO  8
-#define DISTANCE_STOP 20  // cm — arrêt d'urgence si obstacle < 20cm
+#define DISTANCE_STOP 40  // cm — arrêt d'urgence si obstacle < 40cm
+
+// === SERVO RADAR (Tier 3) ===
+#include <Servo.h>
+#define PIN_SERVO 9
+#define SERVO_CENTRE  90   // degres - position avant (arret d'urgence garanti)
+#define SERVO_GAUCHE  45
+#define SERVO_DROITE  135
+#define SERVO_BALAYAGE_INTERVAL 1000  // ms entre deux balayages
+#define SERVO_DELAI_MOUVEMENT   150   // ms pour laisser le servo atteindre la position
+Servo radarServo;
+unsigned long dernierBalayage = 0;
 
 // === VITESSE ===
 #define VITESSE_AVANCE  100   // 0-255
@@ -31,12 +42,42 @@ void setup() {
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
 
+  radarServo.attach(PIN_SERVO);
+  radarServo.write(SERVO_CENTRE);
+
   motorRun(0, 0);
   Serial.println("Arduino pret. En attente d'ordres...");
 }
 
 void loop() {
-  // 1. Lire distance ultrasons
+  // 0. Balayage radar (Tier 3) - non bloquant, base sur millis()
+  // Pendant le balayage, le capteur ne regarde pas l'avant : l'arret
+  // d'urgence frontal n'est garanti qu'en position SERVO_CENTRE.
+  unsigned long maintenant = millis();
+  if (maintenant - dernierBalayage >= SERVO_BALAYAGE_INTERVAL) {
+    dernierBalayage = maintenant;
+
+    radarServo.write(SERVO_GAUCHE);
+    delay(SERVO_DELAI_MOUVEMENT);
+    int distGauche = lireDistance();
+    if (distGauche > 0) {
+      Serial.print("DISTG:");
+      Serial.println(distGauche);
+    }
+
+    radarServo.write(SERVO_DROITE);
+    delay(SERVO_DELAI_MOUVEMENT * 2);  // traversee complete gauche->droite
+    int distDroite = lireDistance();
+    if (distDroite > 0) {
+      Serial.print("DISTD:");
+      Serial.println(distDroite);
+    }
+
+    radarServo.write(SERVO_CENTRE);
+    delay(SERVO_DELAI_MOUVEMENT);
+  }
+
+  // 1. Lire distance ultrasons (position courante du servo, normalement CENTRE)
   int distance = lireDistance();
 
   // 2. Envoyer distance en permanence vers la Pi
@@ -134,3 +175,4 @@ int lireDistance() {
   if (duree == 0) return -1;
   return duree * 0.034 / 2;
 }
+
